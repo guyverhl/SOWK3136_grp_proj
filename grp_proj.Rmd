@@ -1,0 +1,379 @@
+---
+title: "Group_project"
+author: "Chan Hou Long, Guyver"
+date: "11/18/2021"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+  word_document: default
+editor_options:
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = TRUE,
+	message = FALSE,
+	warning = FALSE
+)
+```
+
+# Summary
+
+# Introduction
+
+# Loading and Exploring Data
+## Libraries required
+```{r include=FALSE}
+library(tidyverse)
+library(ggplot2)
+library(tm)
+library(SnowballC)
+library(wordcloud)
+library(wordcloud2)
+library(RColorBrewer)
+library(syuzhet)
+library(e1071)
+library(rpart)
+library(rpart.plot)
+library(randomForest)
+library(neuralnet)
+library(MASS)
+library(regclass)
+library(caret)
+library(pROC)
+```
+
+## Data size and structure
+```{r}
+df.train <- read_csv("~/Documents/HKU/SOWK3136/SOWK3136_grp_proj/dataset/dreaddit-train.csv")
+df.test <- read_csv("~/Documents/HKU/SOWK3136/SOWK3136_grp_proj/dataset/dreaddit-test.csv")
+
+df.full  <- bind_rows(df.train, df.test)
+```
+
+```{r}
+dim(df.full)
+```
+
+```{r}
+str(df.full[,c(1:10)])
+```
+
+# Missing data, label encoding, and factorizing variables
+```{r}
+sum(is.na(df.full))
+apply(apply(df.full,2,is.na),2,sum) ; nrow(df.full)
+```
+
+# Exploring some of the most important variables
+```{r}
+df.full <- df.full[, c("subreddit", "text", "label", "social_karma",
+                         "social_upvote_ratio", "social_num_comments")] %>%
+  rename(is_stress = label)
+```
+
+```{r}
+result = summarize(group_by(df.full,subreddit, is_stress),
+                   count=n())
+result$is_stress = factor(result$is_stress)
+
+ggplot(result, aes(fill=is_stress, y=count, x=reorder(subreddit, -count))) + 
+  geom_bar(position="stack", stat="identity") +
+  theme(axis.text.x = element_text(angle = 60, hjust = 1)) +
+  ggtitle("Number of subreddit with label") +
+  xlab("subreddit")
+```
+
+```{r}
+summarize(group_by(df.full,subreddit),
+          count=n()) %>% arrange(desc(count))
+```
+
+```{r}
+summarize(group_by(df.full,is_stress),
+          count=n()) %>% arrange(desc(count))
+```
+
+# Sentiment Analysis
+```{r}
+set.seed(5312)
+#Create a vector containing only the text
+text <- df.full$text
+# Create a corpus  
+corpus <- Corpus(VectorSource(text))
+
+corpus <- corpus %>%
+  tm_map(removeNumbers) %>%
+  tm_map(removePunctuation) %>%
+  tm_map(stripWhitespace)
+corpus <- tm_map(corpus, content_transformer(tolower))
+corpus <- tm_map(corpus, removeWords, stopwords("english"))
+
+dtm <- TermDocumentMatrix(corpus) 
+dtm.M <- as.matrix(dtm)
+words <- sort(rowSums(dtm.M),decreasing=TRUE)
+dtm_df <- data.frame(word = names(words),freq=words)
+```
+
+```{r}
+ggplot(dtm_df[1:10,], aes(y=freq, x=reorder(word, -freq))) + 
+  geom_bar(position="stack", stat="identity") +
+  ggtitle("Top 10 most frequent words") +
+  ylab("Word frequencies") + xlab("Word")
+```
+
+```{r}
+dtm_df[1:10,]
+```
+
+```{r}
+gen_dtm_df <- function(df) {
+    #Create a vector containing only the text
+    text <- df$text
+    # Create a corpus  
+    corpus <- Corpus(VectorSource(text))
+    
+    corpus <- corpus %>%
+      tm_map(removeNumbers) %>%
+      tm_map(removePunctuation) %>%
+      tm_map(stripWhitespace)
+    corpus <- tm_map(corpus, content_transformer(tolower))
+    corpus <- tm_map(corpus, removeWords, stopwords("english"))
+    
+    dtm <- TermDocumentMatrix(corpus) 
+    dtm.M <- as.matrix(dtm)
+    words <- sort(rowSums(dtm.M),decreasing=TRUE)
+    dtm_df <- data.frame(word = names(words),freq=words)
+    top10_bar <- ggplot(dtm_df[1:10,], aes(y=freq, x=reorder(word, -freq))) + 
+      geom_bar(position="stack", stat="identity") +
+      ggtitle("Top 10 most frequent words") +
+      ylab("Word frequencies") + xlab("Word")
+    return(top10_bar)
+}
+
+# gen_dtm_df(df.full)
+# gen_dtm_df(df.full[df.full$subreddit == "ptsd", ])
+# gen_dtm_df(df.full[df.full$subreddit == "assistance", ])
+# gen_dtm_df(df.full[df.full$subreddit == "relationships", ])
+# gen_dtm_df(df.full[df.full$subreddit == "survivorsofabuse", ])
+# gen_dtm_df(df.full[df.full$subreddit == "domesticviolence", ])
+# gen_dtm_df(df.full[df.full$subreddit == "anxiety", ])
+# gen_dtm_df(df.full[df.full$subreddit == "homeless", ])
+# gen_dtm_df(df.full[df.full$subreddit == "food_pantry", ])
+# gen_dtm_df(df.full[df.full$subreddit == "almosthomeless", ])
+# gen_dtm_df(df.full[df.full$subreddit == "stress", ])
+
+```
+
+## Word Cloud
+```{r}
+set.seed(5312)
+wordcloud(dtm_df$word,dtm_df$freq, scale=c(1.5,.2),min.freq=3,
+          max.words=300, random.order=FALSE, rot.per=.15, 
+          colors=brewer.pal(8, "Dark2"))
+```
+
+```{r}
+# findAssocs(dtm, terms = findFreqTerms(dtm, lowfreq = 900), corlimit = 0.25)
+```
+
+```{r}
+# regular sentiment score using get_sentiment() function and method of your choice
+# please note that different methods may have different scales
+# -1 - +1
+set.seed(5312)
+syuzhet <- get_sentiment(df.full$text, method="syuzhet")
+df.full$syuzhet <- syuzhet
+
+# bing
+bing <- get_sentiment(df.full$text, method="bing")
+df.full$bing <- bing
+
+#affin
+afinn <- get_sentiment(df.full$text, method="afinn")
+df.full$afinn <- afinn
+```
+
+```{r}
+# run nrc sentiment analysis to return data frame with each row classified as one of the following
+# emotions, rather than a score: 
+# anger, anticipation, disgust, fear, joy, sadness, surprise, trust 
+# It also counts the number of positive and negative emotions found in each row
+nrc<-get_nrc_sentiment(df.full$text)
+
+df.full <- cbind(df.full, nrc)
+
+# standardize
+df.full[4:19] <- scale(df.full[4:19])
+```
+
+```{r}
+#transpose
+td<-data.frame(t(nrc))
+#The function rowSums computes column sums across rows for each level of a grouping variable.
+td_new <- data.frame(rowSums(td[2:253]))
+#Transformation and cleaning
+names(td_new)[1] <- "count"
+td_new <- cbind("sentiment" = rownames(td_new), td_new)
+rownames(td_new) <- NULL
+td_new2<-td_new[1:8,]
+#Plot One - count of words associated with each sentiment
+quickplot(sentiment, data=td_new2, weight=count, geom="bar", fill=sentiment, ylab="count")+ggtitle("Survey sentiments")
+```
+
+```{r}
+#Plot two - count of words associated with each sentiment, expressed as a percentage
+barplot(
+  sort(colSums(prop.table(nrc[, 1:8]))),
+  horiz = TRUE,
+  cex.names = 0.7,
+  las = 1,
+  main = "Emotions in Text", xlab="Percentage"
+)
+```
+
+# Prediction
+```{r}
+set.seed(5312)
+train_size <- floor(0.8 * nrow(df.full))
+
+in_rows <- sample(c(1:nrow(df.full)), size = train_size, replace = FALSE)
+
+df.train <- df.full[in_rows, ]
+df.test <- df.full[-in_rows, ]
+
+df.train = df.train[-(1:2)]
+df.train$is_stress = as.factor(df.train$is_stress)
+df.test$is_stress = as.factor(df.test$is_stress)
+
+# Run algorithms using 10-fold cross validation
+control <- trainControl(method="cv", number=10)
+metric <- "Accuracy"
+```
+
+## Logistic regression
+```{r}
+# df.train.stress = df.train[df.train$is_stress == 1, ]
+set.seed(5312)
+lr.fit <- glm(formula = is_stress ~ ., data = df.train, family=binomial)
+summary(lr.fit)
+```
+
+```{r include=FALSE}
+set.seed(5312)
+lr.fit2<- stepAIC(lr.fit, direction="both")
+```
+
+```{r}
+set.seed(5312)
+summary(lr.fit2)
+```
+
+```{r}
+# The Variance Inflation Factor(VIF) is used to measure the multicollinearity between predictor variables in a model. A predictor having a VIF of 2 or less is generally considered safe and it can be assumed that it is not correlated with other predictor variables. Higher the VIF, greater is the correlation of the predictor variable w.r.t other predictor variables. However, Predictors with high VIF may have high p-value(or highly significant), hence, we need to see the significance of the Predictor variable before removing it from our model.
+
+# VIF(lr.fit2)
+
+set.seed(5312)
+lr.fit3 <- train(is_stress ~ social_karma + social_upvote_ratio +
+                   social_num_comments + syuzhet + afinn +
+                   sadness + surprise + negative, data=df.train, 
+                 method="glm", metric=metric, trControl=control)
+summary(lr.fit3)
+```
+
+## Decision tree
+```{r}
+set.seed(5312)
+dt.fit <- train(is_stress ~ ., data=df.train, method="rpart", metric=metric, trControl=control)
+```
+
+## Random forest
+```{r}
+set.seed(5312)
+rf.fit <- train(is_stress ~ ., data=df.train, method="rf", metric=metric, trControl=control)
+```
+
+## SVM
+```{r}
+set.seed(5312)
+svm.fit <- train(is_stress ~ ., data=df.train, method="svmRadial", metric=metric, trControl=control)
+```
+
+## GBM
+```{r}
+set.seed(5312)
+gbm.fit <- train(is_stress ~ ., data=df.train, method="gbm", 
+                 metric=metric, trControl=control, verbose=FALSE)
+```
+
+# Conclusion
+```{r}
+set.seed(5312)
+AccCalc <- function(TestFit, name) {
+    # prediction 
+    predictedval <- predict(TestFit, newdata=df.test)
+    
+    # summarize results with confusion matrix
+    cm <- confusionMatrix(predictedval, df.test$is_stress)
+    
+    # calculate accuracy of the model
+    Accuracy<-round(cm$overall[1],4)
+    Sensitivity <- round(cm$byClass[1], 4)
+    Specificity <- round(cm$byClass[2], 4)
+    acc <- data.frame(Accuracy, Sensitivity, Specificity)
+ 
+    roc_obj <- roc(df.test$is_stress, as.numeric(predictedval))
+    acc$Auc <- auc(roc_obj)
+    
+    acc$FitName <- name
+    return(acc)
+}
+
+accAll <- AccCalc(lr.fit3, "lr")
+accAll <- rbind(accAll, AccCalc(dt.fit, "dt"))
+accAll <- rbind(accAll, AccCalc(rf.fit, "rf"))
+accAll <- rbind(accAll, AccCalc(svm.fit, "svm"))
+accAll <- rbind(accAll, AccCalc(gbm.fit, "gbm"))
+rownames(accAll) <- c()
+arrange(accAll,desc(Accuracy))
+```
+
+```{r}
+set.seed(5312)
+pred.lr <- predict(lr.fit3, newdata=df.test)
+pred.dt <- predict(dt.fit, newdata=df.test)
+pred.rf <- predict(rf.fit, newdata=df.test)
+pred.svm <- predict(svm.fit, newdata=df.test)
+pred.gbm <- predict(gbm.fit, newdata=df.test)
+
+lr.roc <- roc(response = df.test$is_stress, predictor = as.numeric(pred.lr))
+dt.roc <- roc(response = df.test$is_stress, predictor = as.numeric(pred.dt))
+rf.roc <- roc(response = df.test$is_stress, predictor = as.numeric(pred.rf))
+svm.roc <- roc(response = df.test$is_stress, predictor = as.numeric(pred.svm))
+gbm.roc <- roc(response = df.test$is_stress, predictor = as.numeric(pred.gbm))
+
+plot(lr.roc, legacy.axes = TRUE, print.auc.y = 0.95, print.auc = TRUE, print.auc.x = 0)
+plot(dt.roc, col = "blue", add = TRUE, print.auc.y = 0.55, print.auc = TRUE, print.auc.x = 0)
+plot(rf.roc, col = "red" , add = TRUE, print.auc.y = 0.75, print.auc = TRUE, print.auc.x = 0)
+plot(svm.roc, col = "darkgreen" , add = TRUE, print.auc.y = 0.65, print.auc = TRUE, print.auc.x = 0)
+plot(gbm.roc, col = "orange" , add = TRUE, print.auc.y = 0.85, print.auc = TRUE, print.auc.x = 0)
+legend("bottomright", c("Logistic", "Decision Tree", "Random Forest", "SVM", "GBM"),
+       lty = c(1,1), lwd = c(2, 2), col = c("black", "blue", "red", "darkgreen", "orange"), cex = 0.75)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
